@@ -189,6 +189,7 @@ public final class QuietServer {
         private Method getDeviceList;
         private Method setDevicePackage;
         private boolean usbBound;
+        private boolean usbDisabled;
 
         Engine(List<Target> targets, List<UsbRule> rules) {
             this.targets = targets;
@@ -196,24 +197,47 @@ public final class QuietServer {
         }
 
         void loop() {
+            int failures = 0;
             for (;;) {
+                long delay = POLL_MS;
                 try {
                     if (!bound) {
-                        bound = bind();
+                        try {
+                            bound = bind();
+                        } catch (Throwable error) {
+                            // Reflection/shape mismatch is not transient (unsupported firmware):
+                            // log once and stop instead of retrying every second.
+                            log("PMS bind failed; module disabled", error);
+                            return;
+                        }
                     }
                     if (bound) {
                         for (Target target : targets) {
                             apply(target);
                         }
                     }
-                    if (bound && !rules.isEmpty()) {
-                        applyUsbDefaults();
+                    if (bound && !rules.isEmpty() && !usbDisabled) {
+                        try {
+                            applyUsbDefaults();
+                        } catch (Throwable error) {
+                            if (!usbBound) {
+                                log("USB bind failed; usb-default disabled", error);
+                                usbDisabled = true;
+                            } else {
+                                throw error;
+                            }
+                        }
                     }
+                    failures = 0;
                 } catch (Throwable error) {
-                    log("iteration failed", error);
+                    failures++;
+                    if (Integer.bitCount(failures) == 1) {   // log 1st, 2nd, 4th, 8th ...
+                        log("iteration failed (x" + failures + ")", error);
+                    }
+                    delay = Math.min(60000L, POLL_MS << Math.min(failures, 6));
                 }
                 try {
-                    Thread.sleep(POLL_MS);
+                    Thread.sleep(delay);
                 } catch (InterruptedException ignored) {
                     // Process-lifetime daemon.
                 }
