@@ -1,0 +1,6 @@
+id=pico_usb_quiet
+name=PicoUSB-Quiet
+version=1.0.0
+versionCode=1
+author=WolalaQAQ
+description=Stops PICO OS from interrupting VR when a USB helper app is launched by a USB attach ("exit current app" prompt, USB confirm flash). Needs Magisk + Zygisk; no APK is modified.

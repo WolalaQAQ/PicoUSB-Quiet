@@ -1,0 +1,27 @@
+# PicoUSB-Quiet rules.  One rule per line, '#' starts a comment.  Reboot to apply edits.
+#
+# 1) Activity rule:   <package> <activity class or .RelativeName> <position>
+#      position = system_dialog | global_dialog | near_dialog
+#    PICO's SystemExt quick-allows activities of these window classes, so launching one
+#    while a VR app is running no longer shows the "exit current app" confirmation.
+#    Changed in system_server's in-memory package data only; the APK is not touched.
+#
+# 2) USB default rule: usb-default <package> <vid:pid> [<vid:pid> ...]   (decimal or 0x hex)
+#    The first time a matching USB device is seen, <package> is stored as that device's
+#    default handler (the system's own "always use" setting). PICO then starts the handler
+#    directly and skips its auto-confirming UsbConfirmActivity panel (the brief flash).
+#
+# Rules for packages that are not installed are ignored.
+
+# ---- Cymple Link (verified on PICO 4 Pro, PICO OS 5.13.7, Cymple Link 1.9.4 / 1.9.5) ----
+com.example.cymple_link com.example.cymple_link.UsbDeviceAttachedActivity system_dialog
+# VID:PID list is Cymple Link's own device_filter.xml.
+usb-default com.example.cymple_link 1027:24577 1155:22336 4292:60000 6790:29987 1204:516 12346:4097
+
+# ---- Paper eye-tracking dock (NOT TESTED: the maintainers have no Paper hardware) ----
+# Class and package names come from the public project hhhbwc/pico-paper-noplug-dialog,
+# which suppresses the same activity with an Xposed hook instead. Here the activity is only
+# marked as a dialog-class window, so it still starts but without the "exit app" prompt.
+# No usb-default rule is provided for Paper: its USB VID:PID values are unknown to us.
+# If you use Paper, please report results (see README). Delete the line below to disable.
+com.bridge.papertracker com.bridge.papertrackermodern.receiver.SystemEventActivity system_dialog

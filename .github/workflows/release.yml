@@ -1,0 +1,110 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and verify module
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+
+      - name: Install pinned Android build inputs
+        run: |
+          sdkmanager "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-35" "build-tools;35.0.0"
+          if ($LASTEXITCODE) { throw 'sdkmanager failed' }
+
+      - name: Source checks (version, rules syntax, tag)
+        run: |
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { '' }
+          pwsh -NoProfile -File tests/check-package.ps1 -Tag $tag
+          if ($LASTEXITCODE) { throw 'Source checks failed' }
+          $props = Get-Content -Raw module/module.prop
+          $version = ([regex]::Match($props, '(?m)^version=(.+)$')).Groups[1].Value.Trim()
+          "MODULE_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Build module
+        run: |
+          if (-not $env:JAVA_HOME_17_X64) { throw 'Hosted JDK 17 is required.' }
+          $env:JAVA_HOME = $env:JAVA_HOME_17_X64
+          pwsh -NoProfile -File tools/build.ps1
+          if ($LASTEXITCODE) { throw 'Build failed' }
+
+      - name: Verify built ZIP
+        run: |
+          pwsh -NoProfile -File tests/check-package.ps1 -ZipPath "dist/PicoUSB-Quiet-v${{ env.MODULE_VERSION }}.zip"
+          if ($LASTEXITCODE) { throw 'ZIP verification failed' }
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: module
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: module
+          path: release
+
+      - name: Publish verified assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum --check --strict SHA256SUMS.txt
+          bundle="PicoUSB-Quiet-${RELEASE_TAG}.zip"
+          test -f "$bundle"
+          cat > notes.md <<'EOF'
+          Magisk module (Zygisk). Install the ZIP from the Magisk app, then reboot.
+          Requires PICO OS (Android 10), Magisk 27+ with Zygisk enabled.
+
+          Verified: Cymple Link on PICO 4 Pro / PICO OS 5.13.7.
+          **Not tested** (no hardware): the Paper rule. Reports welcome.
+
+          Check the SHA-256 against `SHA256SUMS.txt`.
+          EOF
+          flags=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" \
+            --verify-tag --notes-file notes.md --generate-notes \
+            --title "PicoUSB-Quiet $RELEASE_TAG" \
+            "${flags[@]}" \
+            "$bundle" SHA256SUMS.txt

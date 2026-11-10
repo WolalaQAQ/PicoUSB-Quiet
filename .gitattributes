@@ -1,0 +1,8 @@
+* text=auto
+*.sh text eol=lf
+*.txt text eol=lf
+*.prop text eol=lf
+*.yml text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.java text eol=lf
